@@ -1,31 +1,48 @@
+'use strict';
 const crypto = require('crypto');
 
 const aesCrypt = exports;
-aesCrypt.decrypt = function(fileIn, password, callback){
+aesCrypt.decrypt = function (fileIn, password, callback) {
     if (typeof callback == 'function')
         HandleWithCallback(fileIn, password, callback);
 };
-const defaultError = 'Error: file is corrupted or not an AES Crypt (or pyAesCrypt) file.';
+const fileCorrupt = '. Or the file is corrupted';
 
 
-function HandleWithCallback(f, pwd, cb){
+function HandleWithCallback(f, pwd, cb) {
+    var cbAlreadyCall = false;
     f.on('readable', function () {
-        //First 3 bytes should be 'AES'
-        var data = f.read(3);
-        if (data.toString('ascii') != 'AES') {
-            Terminate(defaultError);
-        }
+        if (!cbAlreadyCall) {
+            var err, dataBuf;
+            try {
+                //First 3 bytes should be 'AES'
+                var data = f.read(3);
+                if (!data || data.toString('ascii') != 'AES') {
+                    throw new Error('File should start with 3 bytes = "AES"');
+                }
 
-        //Check version, for now only v2
-        data = f.read(1);
-        if (data[0] != 2) {
-            Terminate(defaultError);
-        } else {
-            var dataBuf = VersionV2(f, pwd);
-            cb(undefined, dataBuf);
+                //Check version, for now only v2
+                data = f.read(1);
+                switch (data[0]) {
+                    case 2:
+                        dataBuf = VersionV2(f, pwd);
+                        break;
+                    default:
+                        throw new Error('The only supported file format version is v2. File version : v' + data[0]);
+                }
+            }
+            catch (e) {
+                err = e;
+            }
+            finally {
+                cbAlreadyCall = true;
+                cb(err+fileCorrupt, dataBuf);
+            }
         }
-
     });
+}
+
+function FileFormatV2(fileStream, password){
 }
 
 function VersionV2(f, pwd) {
@@ -65,7 +82,7 @@ function VersionV2(f, pwd) {
 
     var decipher1 = crypto.createDecipheriv('aes-256-cbc', key, ivExt);
     decipher1.setAutoPadding(false);
-    var iv_key = Buffer.concat([decipher1.update(encIvAndKey),decipher1.final()]);
+    var iv_key = Buffer.concat([decipher1.update(encIvAndKey), decipher1.final()]);
 
     var realIv = iv_key.slice(0, 16);
     var realKey = iv_key.slice(16);
@@ -78,7 +95,7 @@ function VersionV2(f, pwd) {
     while (f._readableState.length - 32 - 1 - 16) {
         cText = f.read(16);
         hmac.update(cText);
-        textBuf = Buffer.concat([decipher.update(cText),decipher.final()]);
+        textBuf = Buffer.concat([decipher.update(cText), decipher.final()]);
     }
 
     cText = f.read(16);
@@ -86,10 +103,10 @@ function VersionV2(f, pwd) {
 
     var fileSize = f.read(1);
 
-    if (textBuf != undefined){
-        textBuf = Buffer.concat([textBuf, decipher.update(cText),decipher.final()])
+    if (textBuf != undefined) {
+        textBuf = Buffer.concat([textBuf, decipher.update(cText), decipher.final()])
     } else {
-        textBuf = Buffer.concat([decipher.update(cText),decipher.final()]);
+        textBuf = Buffer.concat([decipher.update(cText), decipher.final()]);
     }
     var byteToRemove = (16 - ConvertBufferToInt(fileSize)) % 16;
     return textBuf.slice(0, -byteToRemove);
