@@ -4,9 +4,14 @@ const CustomBuffer = require('./customBuffer.js');
 
 class DecrypterAesFileFormatV2FromBuffer {
     constructor(fileBuffer, password) {
-        if (!(fileBuffer instanceof Buffer)) throw new Error('fileBuffer should be a Buffer');
-        if (!password) throw new Error('password should be a String');
-        this._fileCustomBuffer = new CustomBuffer(fileBuffer);
+        if (!((fileBuffer instanceof Buffer) || (fileBuffer instanceof CustomBuffer)))
+            throw new TypeError('fileBuffer should be a Buffer');
+        if (!password)
+            throw new ReferenceError('password should be a String');
+        if (fileBuffer instanceof Buffer)
+            this._fileCustomBuffer = new CustomBuffer(fileBuffer);
+        else
+            this._fileCustomBuffer = fileBuffer;
         this.password = password;
     }
 
@@ -130,18 +135,73 @@ class DecrypterAesFileFormatV2FromBuffer {
 class DecrypterAesFileFormatFromBuffer {
     constructor(fileBuffer, password) {
         if (!(fileBuffer instanceof Buffer)) throw new Error('fileBuffer should be a Buffer');
-        if (!(password instanceof String)) throw new Error('password should be a String');
-        this.fileBuffer = fileBuffer;
+        if (!password) throw new Error('password should be a String');
+        this._fileCustomBuffer = new CustomBuffer(fileBuffer);
         this.password = password;
     }
 
     _checkAesFile() {
-
+        let data = this._fileCustomBuffer.read(3);
+        if (!data || data.toString('ascii') != 'AES') {
+            throw new Error('File should start with 3 bytes = "AES"');
+        }
     }
 
     _checkVersion() {
+        this.version = this._fileCustomBuffer.read(1)[0];
+    }
+
+    decrypt(){
+        this._fileCustomBuffer.resetByteRead();
+        this._checkAesFile();
+        this._checkVersion();
+        switch (this.version){
+            case 2:
+                let dataDecrypted = new DecrypterAesFileFormatV2FromBuffer(this._fileCustomBuffer, this.password);
+                return dataDecrypted.decrypt();
+                break;
+            default:
+                throw new Error('The only supported file format version is v2. File version : v' + data[0]);
+        }
+    }
+}
+
+class EncrypterAesFileFormatFromBuffer{
+    constructor(fileBuffer, password){
+        if (!(fileBuffer instanceof Buffer)) throw new Error('fileBuffer should be a Buffer');
+        if (!password) throw new Error('password should be a String');
+        this._fileCustomBuffer = new CustomBuffer(fileBuffer);
+        this.password = password;
+        this.buffer = new Buffer(0);
+    }
+    _concat(buff){
+        this.buffer = Buffer.concat([this.buffer, buff]);
+    }
+    _writeHeaders(){
+        this._concat(new Buffer('AES'));
+    }
+    _writeVersion2(){
+        this._concat(new Buffer([2]));
+    }
+    _writeReservedByte(){
+        this._concat(new Buffer([0]));
+    }
+    _writeExtension(){
+        let extensionName = new Buffer('nodeaescrypt');
+        let createdBy = new Buffer('CREATED_BY');
+        let nullByte = new Buffer([0]);
+        this._concat(new Buffer([0, createdBy.length + nullByte.length + extensionName.length]));
+        this._concat(new Buffer([0, createdBy + nullByte + extensionName]));
+        this._concat(new Buffer([0, 128]));
+        this._concat(new Buffer(130).fill(0));
+    }
+    _writePublicIv(){
+        this._publicIv = crypto.randomBytes(16);
+        this._concat(this._publicIv);
+    }
+    _writeEncryptedIvAndKey(){
 
     }
 }
 
-module.exports = DecrypterAesFileFormatV2FromBuffer;
+module.exports = DecrypterAesFileFormatFromBuffer;
